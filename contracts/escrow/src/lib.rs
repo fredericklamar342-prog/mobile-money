@@ -98,7 +98,7 @@ mod tests {
         Address, Env,
     };
 
-    fn setup() -> (Env, Address, Address, Address, Address, EscrowContractClient<'static>) {
+    fn setup(custom_issuer: Option<Address>) -> (Env, Address, Address, Address, Address, EscrowContractClient<'static>) {
         let env = Env::default();
         env.mock_all_auths();
 
@@ -107,7 +107,7 @@ mod tests {
         let arbiter = Address::generate(&env);
 
         // Deploy a test SAC token.
-        let token_admin = Address::generate(&env);
+        let token_admin = custom_issuer.unwrap_or_else(|| Address::generate(&env));
         let token_id = env.register_stellar_asset_contract_v2(token_admin.clone());
         let token_sac = StellarAssetClient::new(&env, &token_id.address());
         token_sac.mint(&depositor, &1_000_000);
@@ -120,7 +120,7 @@ mod tests {
 
     #[test]
     fn test_initialize_and_release() {
-        let (env, depositor, beneficiary, arbiter, token, client) = setup();
+        let (env, depositor, beneficiary, arbiter, token, client) = setup(None);
         let amount: i128 = 500_000;
 
         client.initialize(&depositor, &beneficiary, &arbiter, &token, &amount);
@@ -138,7 +138,7 @@ mod tests {
 
     #[test]
     fn test_refund() {
-        let (env, depositor, beneficiary, arbiter, token, client) = setup();
+        let (env, depositor, beneficiary, arbiter, token, client) = setup(None);
         let amount: i128 = 200_000;
 
         client.initialize(&depositor, &beneficiary, &arbiter, &token, &amount);
@@ -147,5 +147,20 @@ mod tests {
         let token_client = TokenClient::new(&env, &token);
         assert_eq!(token_client.balance(&depositor), 1_000_000); // full balance back
         assert!(client.get_state().released);
+    }
+
+    #[test]
+    fn test_setup_with_custom_issuer() {
+        let env = Env::default();
+        let custom_issuer = Address::generate(&env);
+        let (env_out, _depositor, _beneficiary, _arbiter, token, _client) = setup(Some(custom_issuer.clone()));
+
+        // Verify the custom_issuer address can mint successfully (confirming it is the admin/issuer of the SAC token)
+        let token_sac = StellarAssetClient::new(&env_out, &token);
+        let recipient = Address::generate(&env_out);
+        token_sac.mint(&recipient, &100);
+        
+        let token_client = TokenClient::new(&env_out, &token);
+        assert_eq!(token_client.balance(&recipient), 100);
     }
 }
