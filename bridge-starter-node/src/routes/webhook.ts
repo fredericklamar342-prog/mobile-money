@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { verifySignature } from "../middleware/verifySignature";
+import { verifyWebhookSignature } from "../middleware/verifySignature";
 import { WebhookEvent, PaymentData } from "../types/webhook";
 import logger from "../logger";
 
@@ -7,8 +7,8 @@ const router = Router();
 
 router.post(
   "/webhook",
-  verifySignature,
-  (req: Request, res: Response): void => {
+  verifyWebhookSignature,
+  (req: Request, res: Response) => {
     const event = req.body as WebhookEvent<PaymentData>;
 
     logger.info(

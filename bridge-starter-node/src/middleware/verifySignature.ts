@@ -11,7 +11,7 @@ import logger from "../logger";
  * Logs a structured warning on every rejected request so security teams
  * can monitor for signature mismatches without parsing free-text messages.
  */
-export const verifySignature = (
+export const verifyWebhookSignature = (
   req: Request,
   res: Response,
   next: NextFunction,
