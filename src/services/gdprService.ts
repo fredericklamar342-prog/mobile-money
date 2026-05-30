@@ -25,8 +25,7 @@ import { createZipFile } from "../utils/create-zip-file";
 import { logAuditEvent } from "../utils/log-audit-event";
 import { AuditLog, auditService } from "./auditlogService";
 import { TransactionService } from "./transanctionService";
-import { ListObjectsV2Command, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { getS3Client, s3Config } from "../config/s3";
+
 import {
   deactivateUserAccount,
   getUserById,
@@ -150,8 +149,8 @@ export class GDPRService {
 
       // Log erasure event
       await logAuditEvent(userId, "RIGHT_TO_BE_FORGOTTEN_EXECUTED");
+await this.deleteUserS3Objects(userId);
 await this.deleteUserAttachments(userId);
-
       // Disable/deactivate user accout
       await this.deactivateUserAccount(userId);
     } catch (err) {
