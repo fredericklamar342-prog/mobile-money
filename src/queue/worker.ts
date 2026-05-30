@@ -4,9 +4,17 @@ import {
   TransactionJobResult,
 } from "./transactionQueue";
 import { rabbitMQManager, EXCHANGES, ROUTING_KEYS, QUEUES } from "./rabbitmq";
+import {
+  natsManager,
+  NATS_QUEUE_ENABLED,
+  NATS_SUBJECT,
+  NATS_DURABLE_CONSUMER,
+  NATS_CONSUMER_GROUP,
+} from "./nats";
 import { TransactionModel, TransactionStatus } from "../models/transaction";
 import { MobileMoneyService } from "../services/mobilemoney/mobileMoneyService";
 import { StellarService } from "../services/stellar/stellarService";
+import * as highThroughputService from "../services/stellar/highThroughputService";
 import { UserModel } from "../models/users";
 import { EmailService } from "../services/email";
 import { withRetry } from "../services/retry";
@@ -26,7 +34,10 @@ const emailService = new EmailService();
 const pushService = pushNotificationService;
 const webhookService = new WebhookService();
 
-const CONCURRENCY = 5;
+const CONCURRENCY = Math.max(
+  1,
+  parseInt(process.env.TRANSACTION_WORKER_CONCURRENCY || "5", 10),
+);
 
 export async function handleSubscriptionFailure(
   subscriptionId: string,
@@ -200,9 +211,13 @@ async function processTransaction(data: TransactionJobData): Promise<Transaction
     provider,
     stellarAddress,
     requestId,
+    _traceId,
   } = data;
 
-  const log = requestId ? logger.child({ requestId, transactionId }) : logger.child({ transactionId });
+  const logFields: Record<string, string> = { transactionId };
+  if (requestId) logFields.requestId = requestId;
+  if (_traceId) logFields.traceId = _traceId;
+  const log = logger.child(logFields);
   log.info({ type, provider }, `[RabbitMQ] Processing transaction`);
 
   const maxAttempts = Math.max(
@@ -269,7 +284,21 @@ async function processTransaction(data: TransactionJobData): Promise<Transaction
   };
 
         const stellarResult = await withRetry(
-          () => stellarService.sendPayment(stellarAddress, amount, senderName, receiverName),
+          () => {
+            // Use high-throughput pool service when available; falls back to single-account mode
+            const issuerSecret = process.env.STELLAR_ISSUER_SECRET?.trim();
+            if (highThroughputService.isServiceInitialized() && issuerSecret) {
+              const issuerKp = require("stellar-sdk").Keypair.fromSecret(issuerSecret);
+              return highThroughputService.submitPayment({
+                sourceAccount: issuerKp.publicKey(),
+                sourceSecret: issuerSecret,
+                destination: stellarAddress,
+                asset: "native",
+                amount: String(amount),
+              }).then(r => ({ hash: r.hash, submittedAt: new Date() }));
+            }
+            return stellarService.sendPayment(stellarAddress, amount, senderName, receiverName);
+          },
           retryConfig,
         );
 
@@ -323,7 +352,21 @@ async function processTransaction(data: TransactionJobData): Promise<Transaction
       await updateProgress(transactionId, 70);
 
       await withRetry(
-        () => stellarService.sendPayment(stellarAddress, amount, senderName, receiverName),
+        () => {
+          // Use high-throughput pool service when available; falls back to single-account mode
+          const issuerSecret = process.env.STELLAR_ISSUER_SECRET?.trim();
+          if (highThroughputService.isServiceInitialized() && issuerSecret) {
+            const issuerKp = require("stellar-sdk").Keypair.fromSecret(issuerSecret);
+            return highThroughputService.submitPayment({
+              sourceAccount: issuerKp.publicKey(),
+              sourceSecret: issuerSecret,
+              destination: stellarAddress,
+              asset: "native",
+              amount: String(amount),
+            });
+          }
+          return stellarService.sendPayment(stellarAddress, amount, senderName, receiverName);
+        },
         retryConfig,
       );
 
@@ -458,16 +501,36 @@ async function processTransaction(data: TransactionJobData): Promise<Transaction
 // }
 
 // Start consuming
-rabbitMQManager.consume<TransactionJobData>(
-  QUEUES.TRANSACTION_PROCESSING,
-  async (data, msg) => {
-    await processTransaction(data);
-  },
-  CONCURRENCY
-).catch(err => logger.error({ err }, "RabbitMQ Consumer error"));
+const consumerLabel = NATS_QUEUE_ENABLED ? "NATS JetStream" : "RabbitMQ";
+
+if (NATS_QUEUE_ENABLED) {
+  natsManager
+    .consume<TransactionJobData>(
+      NATS_SUBJECT,
+      NATS_DURABLE_CONSUMER,
+      NATS_CONSUMER_GROUP,
+      async (data) => {
+        await processTransaction(data);
+      },
+      CONCURRENCY,
+    )
+    .catch((err) => logger.error({ err }, "NATS JetStream Consumer error"));
+} else {
+  rabbitMQManager.consume<TransactionJobData>(
+    QUEUES.TRANSACTION_PROCESSING,
+    async (data) => {
+      await processTransaction(data);
+    },
+    CONCURRENCY,
+  ).catch((err) => logger.error({ err }, "RabbitMQ Consumer error"));
+}
 
 export const transactionWorker = {
-  close: async () => {}, // Handled by rabbitMQManager global shutdown
+  close: async () => {
+    if (NATS_QUEUE_ENABLED) {
+      await natsManager.close();
+    }
+  },
 };
 
 export async function closeWorker() {

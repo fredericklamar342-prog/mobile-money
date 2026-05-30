@@ -1,5 +1,23 @@
 import { Request, Response, NextFunction } from "express";
 import { z } from "zod";
+import { resolveToBaseAddress } from "../stellar/muxed";
+
+/**
+ * Validate Stellar address format (G-address or M-address).
+ * Both formats are accepted, but M-addresses must be valid muxed accounts.
+ */
+function validateStellarAddress(address: string): boolean {
+  if (!address || typeof address !== "string") {
+    return false;
+  }
+  
+  try {
+    resolveToBaseAddress(address);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const transactionSchema = z.object({
   amount: z.number().positive({ message: "Amount must be a positive number" }),
@@ -11,7 +29,7 @@ const transactionSchema = z.object({
   }),
   stellarAddress: z
     .string()
-    .regex(/^G[A-Z2-7]{55}$/, { message: "Invalid Stellar address format" }),
+    .refine(validateStellarAddress, { message: "Invalid Stellar address format (must be valid G-address or M-address)" }),
   userId: z.string().nonempty({ message: "userId is required" }),
 });
 

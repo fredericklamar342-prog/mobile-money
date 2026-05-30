@@ -8,6 +8,11 @@ dist/
 contracts/target/
 *.tsbuildinfo
 
+# Kotlin SDK build artifacts
+sdk/build/
+sdk/.gradle/
+gradle-temp/
+
 # Environment and secrets
 .env
 .env.local
@@ -44,3 +49,4 @@ benchmarks/results/*.json
 *.temp
 .cache/
 
+secret.yaml
