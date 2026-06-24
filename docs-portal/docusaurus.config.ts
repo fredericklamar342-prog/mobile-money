@@ -66,6 +66,7 @@ const config: Config = {
       items: [
         { to: '/', label: 'Overview', position: 'left' },
         { to: '/api', label: 'Reference', position: 'left' },
+        { to: '/graphql', label: 'GraphQL Playground', position: 'left' },
         {
           href: 'https://github.com/sublime247/mobile-money',
           label: 'GitHub',
@@ -78,7 +79,10 @@ const config: Config = {
       links: [
         {
           title: 'Docs',
-          items: [{ label: 'API Reference', to: '/api' }],
+          items: [
+            { label: 'API Reference', to: '/api' },
+            { label: 'GraphQL Playground', to: '/graphql' },
+          ],
         },
       ],
       copyright: `Copyright © ${new Date().getFullYear()} Mobile Money`,
